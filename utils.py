@@ -1,5 +1,6 @@
 from openpyxl import load_workbook
-from models import Product, db
+from models import Product, ShopInventory, StockMovement, db
+from stock_routes import apply_stock_movement, get_or_create_inventory
 import os
 
 def parse_excel_products(file_path):
@@ -64,7 +65,7 @@ def parse_excel_products(file_path):
     except Exception as e:
         return products, [f"Error reading Excel file: {str(e)}"]
 
-def save_products_to_db(products_data):
+def save_products_to_db(products_data, shop_id=None, user_id=None):
     """
     Save parsed products to database
     Returns: (success_count, duplicate_count, error_list)
@@ -78,6 +79,9 @@ def save_products_to_db(products_data):
             # Check if product already exists
             existing = Product.query.filter_by(code=product_data['code']).first()
             
+            product_stock = int(product_data.get('stockLevel', 0))
+            product_reorder_level = int(product_data.get('reorderLevel', 10))
+
             if existing:
                 duplicate_count += 1
                 # Update existing product
@@ -86,13 +90,31 @@ def save_products_to_db(products_data):
                 existing.description = product_data['description']
                 existing.costPrice = product_data['costPrice']
                 existing.sellingPrice = product_data['sellingPrice']
-                existing.stockLevel = product_data['stockLevel']
                 existing.reorderLevel = product_data['reorderLevel']
                 db.session.add(existing)
+                product = existing
             else:
                 # Create new product
                 product = Product(**product_data)
                 db.session.add(product)
+                db.session.flush()
+
+            if shop_id:
+                inventory = get_or_create_inventory(shop_id, product.id, product_reorder_level)
+                inventory.reorder_level = product_reorder_level
+                quantity = product_stock - inventory.stock_level
+                apply_stock_movement(
+                    shop_id=shop_id,
+                    product_id=product.id,
+                    movement_type='manual_adjustment',
+                    quantity=quantity,
+                    user_id=user_id,
+                    reason='Excel product import',
+                    reference_type='product_upload',
+                    reference_id=product.code,
+                    reorder_level=product_reorder_level,
+                    allow_zero=True,
+                )
             
             success_count += 1
             

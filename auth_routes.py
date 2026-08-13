@@ -1,8 +1,16 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity, get_jwt
-from models import User, db
+from models import User, Shop, db
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
+
+
+def _first_active_shop():
+    return Shop.query.filter_by(is_active=True).order_by(Shop.created_at).first()
+
+
+def _token_claims(user):
+    return {'name': user.name, 'role': user.role, 'shopId': user.shop_id}
 
 
 # ---------------------------------------------------------------------------
@@ -30,14 +38,19 @@ def initial_setup():
     if not pin.isdigit() or len(pin) < 4 or len(pin) > 6:
         return jsonify({'success': False, 'message': 'PIN must be 4-6 digits'}), 400
 
-    user = User(name=name, role='owner')
+    shop_name = data.get('shopName', 'Main Shop').strip() or 'Main Shop'
+    shop = Shop(name=shop_name, location=data.get('shopLocation', '').strip())
+    db.session.add(shop)
+    db.session.flush()
+
+    user = User(name=name, role='owner', shop_id=shop.id)
     user.set_pin(pin)
     db.session.add(user)
     db.session.commit()
 
     token = create_access_token(
         identity=str(user.id),
-        additional_claims={'name': user.name, 'role': user.role}
+        additional_claims=_token_claims(user)
     )
     return jsonify({'success': True, 'token': token, 'user': user.to_dict()}), 201
 
@@ -66,7 +79,7 @@ def login():
 
     token = create_access_token(
         identity=str(user.id),
-        additional_claims={'name': user.name, 'role': user.role}
+        additional_claims=_token_claims(user)
     )
     return jsonify({'success': True, 'token': token, 'user': user.to_dict()}), 200
 
@@ -76,7 +89,7 @@ def login():
 def me():
     """Return the profile of the authenticated user."""
     user_id = get_jwt_identity()
-    user = User.query.get(int(user_id))
+    user = User.query.get(user_id)
     if not user:
         return jsonify({'success': False, 'message': 'User not found'}), 404
     return jsonify({'success': True, 'user': user.to_dict()}), 200
@@ -110,6 +123,7 @@ def create_user():
     name = data.get('name', '').strip()
     pin = str(data.get('pin', ''))
     role = data.get('role', 'cashier')
+    shop_id = data.get('shopId')
 
     if not name or not pin:
         return jsonify({'success': False, 'message': 'Name and PIN are required'}), 400
@@ -121,7 +135,17 @@ def create_user():
     if User.query.filter(db.func.lower(User.name) == name.lower()).first():
         return jsonify({'success': False, 'message': 'A user with that name already exists'}), 409
 
-    user = User(name=name, role=role)
+    if shop_id:
+        shop = Shop.query.get(shop_id)
+        if not shop or not shop.is_active:
+            return jsonify({'success': False, 'message': 'Shop not found or inactive'}), 400
+    else:
+        shop = _first_active_shop()
+        if not shop:
+            return jsonify({'success': False, 'message': 'Create a shop before adding users'}), 400
+        shop_id = shop.id
+
+    user = User(name=name, role=role, shop_id=shop_id)
     user.set_pin(pin)
     db.session.add(user)
     db.session.commit()
@@ -158,6 +182,13 @@ def update_user(user_id):
             user.name = data['name'].strip()
         if 'role' in data and data['role'] in ('owner', 'cashier'):
             user.role = data['role']
+        if 'shopId' in data:
+            shop_id = data.get('shopId')
+            if shop_id:
+                shop = Shop.query.get(shop_id)
+                if not shop or not shop.is_active:
+                    return jsonify({'success': False, 'message': 'Shop not found or inactive'}), 400
+            user.shop_id = shop_id
         if 'isActive' in data:
             user.is_active = bool(data['isActive'])
 

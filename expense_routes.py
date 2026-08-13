@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
-from models import Expense, db
+from auth_utils import is_owner, resolve_accessible_shop
+from models import Expense, Shift, db
 from datetime import datetime
 
 expenses_bp = Blueprint('expenses', __name__, url_prefix='/api/expenses')
@@ -12,6 +13,7 @@ def sync_expense():
     """Receive a synced expense from Flutter.  Idempotent on expense id."""
     user_id = get_jwt_identity()
     claims = get_jwt()
+    owner = is_owner()
     data = request.get_json() or {}
 
     if not data.get('category') or 'amount' not in data:
@@ -24,11 +26,39 @@ def sync_expense():
             return jsonify({'success': True, 'message': 'Already synced', 'data': existing.to_dict()}), 200
 
     try:
+        shop = resolve_accessible_shop(data.get('shopId') or claims.get('shopId'))
+        shop_id = shop.id
+        cashier_id = data.get('cashierId', user_id) if owner else user_id
+        cashier_name = data.get('cashierName', claims.get('name', '')) if owner else claims.get('name', '')
+
+        shift_id = data.get('shiftId')
+        if not shift_id and not owner:
+            open_shift = Shift.query.filter_by(
+                cashier_id=user_id,
+                shop_id=shop_id,
+                status='open',
+            ).first()
+            if not open_shift:
+                return jsonify({'success': False, 'message': 'An open shift is required before recording expenses'}), 400
+            shift_id = open_shift.id
+
+        if shift_id:
+            shift = Shift.query.get(shift_id)
+            if not shift:
+                return jsonify({'success': False, 'message': 'Shift not found'}), 400
+            if shift.status != 'open':
+                return jsonify({'success': False, 'message': 'Shift must be open'}), 400
+            if shift.shop_id and shift.shop_id != shop_id:
+                return jsonify({'success': False, 'message': 'Shift does not belong to this shop'}), 400
+            if not owner and shift.cashier_id != user_id:
+                return jsonify({'success': False, 'message': 'Shift does not belong to this cashier'}), 400
+
         expense = Expense(
             id=data.get('id'),   # None → auto-generated UUID
-            shift_id=data.get('shiftId'),
-            cashier_id=data.get('cashierId', user_id),
-            cashier_name=data.get('cashierName', claims.get('name', '')),
+            shift_id=shift_id,
+            shop_id=shop_id,
+            cashier_id=cashier_id,
+            cashier_name=cashier_name,
 
             category=data['category'],
             amount=float(data['amount']),
@@ -60,9 +90,12 @@ def list_expenses():
         query = query.filter_by(cashier_id=user_id)
 
     shift_id = request.args.get('shiftId')
+    shop_id = request.args.get('shopId')
     status = request.args.get('status')
     if shift_id:
         query = query.filter_by(shift_id=shift_id)
+    if shop_id and is_owner():
+        query = query.filter_by(shop_id=shop_id)
     if status:
         query = query.filter_by(approval_status=status)
 
@@ -74,7 +107,7 @@ def list_expenses():
 @jwt_required()
 def approve_expense(expense_id):
     claims = get_jwt()
-    if claims.get('role') != 'owner':
+    if not is_owner():
         return jsonify({'success': False, 'message': 'Owner access required'}), 403
 
     expense = Expense.query.get(expense_id)
@@ -91,7 +124,7 @@ def approve_expense(expense_id):
 @jwt_required()
 def reject_expense(expense_id):
     claims = get_jwt()
-    if claims.get('role') != 'owner':
+    if not is_owner():
         return jsonify({'success': False, 'message': 'Owner access required'}), 403
 
     expense = Expense.query.get(expense_id)

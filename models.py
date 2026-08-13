@@ -5,6 +5,36 @@ import uuid
 
 db = SQLAlchemy()
 
+class Shop(db.Model):
+    """A physical shop/branch in the business."""
+    __tablename__ = 'shops'
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    name = db.Column(db.String(120), nullable=False, unique=True)
+    location = db.Column(db.String(255), default='')
+    is_active = db.Column(db.Boolean, default=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    users = db.relationship('User', backref='shop', lazy=True)
+    shifts = db.relationship('Shift', backref='shop', lazy=True)
+    transactions = db.relationship('Transaction', backref='shop', lazy=True)
+    expenses = db.relationship('Expense', backref='shop', lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'name': self.name,
+            'location': self.location,
+            'isActive': self.is_active,
+            'createdAt': self.created_at.isoformat(),
+            'updatedAt': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def __repr__(self):
+        return f'<Shop {self.name}>'
+
+
 class Product(db.Model):
     """Product model for SQLAlchemy"""
     __tablename__ = 'products'
@@ -18,6 +48,7 @@ class Product(db.Model):
     # Pricing
     costPrice = db.Column(db.Float, default=0.0)
     sellingPrice = db.Column(db.Float, nullable=False)
+    is_active = db.Column(db.Boolean, default=True)
     
     # Inventory
     stockLevel = db.Column(db.Integer, default=0)
@@ -37,6 +68,7 @@ class Product(db.Model):
             'category': self.category,
             'costPrice': self.costPrice,
             'sellingPrice': self.sellingPrice,
+            'isActive': self.is_active,
             'stockLevel': self.stockLevel,
             'reorderLevel': self.reorderLevel,
             'createdAt': self.createdAt.isoformat(),
@@ -47,6 +79,92 @@ class Product(db.Model):
         return f'<Product {self.name} ({self.code})>'
 
 
+class ShopInventory(db.Model):
+    """Current stock level for one product in one shop."""
+    __tablename__ = 'shop_inventory'
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    shop_id = db.Column(db.String(36), db.ForeignKey('shops.id'), nullable=False)
+    product_id = db.Column(db.String(36), db.ForeignKey('products.id'), nullable=False)
+    stock_level = db.Column(db.Integer, default=0)
+    reorder_level = db.Column(db.Integer, default=10)
+    updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
+
+    shop = db.relationship('Shop', backref='inventory_items', lazy=True)
+    product = db.relationship('Product', backref='shop_inventory', lazy=True)
+
+    __table_args__ = (
+        db.UniqueConstraint('shop_id', 'product_id', name='uq_shop_inventory_shop_product'),
+    )
+
+    def to_dict(self):
+        product = self.product
+        return {
+            'id': self.id,
+            'shopId': self.shop_id,
+            'shopName': self.shop.name if self.shop else None,
+            'productId': self.product_id,
+            'code': product.code if product else None,
+            'name': product.name if product else None,
+            'description': product.description if product else '',
+            'category': product.category if product else None,
+            'costPrice': product.costPrice if product else 0.0,
+            'sellingPrice': product.sellingPrice if product else 0.0,
+            'isActive': product.is_active if product else False,
+            'stockLevel': self.stock_level,
+            'reorderLevel': self.reorder_level,
+            'updatedAt': self.updated_at.isoformat() if self.updated_at else None,
+        }
+
+    def __repr__(self):
+        return f'<ShopInventory shop={self.shop_id} product={self.product_id} stock={self.stock_level}>'
+
+
+class StockMovement(db.Model):
+    """Append-only audit trail for stock changes."""
+    __tablename__ = 'stock_movements'
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    shop_id = db.Column(db.String(36), db.ForeignKey('shops.id'), nullable=False, index=True)
+    product_id = db.Column(db.String(36), db.ForeignKey('products.id'), nullable=False, index=True)
+    type = db.Column(db.String(30), nullable=False)  # sale, stock_received, manual_adjustment, void
+    quantity = db.Column(db.Integer, nullable=False)
+    stock_before = db.Column(db.Integer, nullable=False)
+    stock_after = db.Column(db.Integer, nullable=False)
+    reason = db.Column(db.Text, default='')
+    reference_type = db.Column(db.String(50), default='')
+    reference_id = db.Column(db.String(100), default='')
+    created_by = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+
+    shop = db.relationship('Shop', backref='stock_movements', lazy=True)
+    product = db.relationship('Product', backref='stock_movements', lazy=True)
+    user = db.relationship('User', backref='stock_movements', lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'shopId': self.shop_id,
+            'shopName': self.shop.name if self.shop else None,
+            'productId': self.product_id,
+            'productCode': self.product.code if self.product else None,
+            'productName': self.product.name if self.product else None,
+            'type': self.type,
+            'quantity': self.quantity,
+            'stockBefore': self.stock_before,
+            'stockAfter': self.stock_after,
+            'reason': self.reason,
+            'referenceType': self.reference_type,
+            'referenceId': self.reference_id,
+            'createdBy': self.created_by,
+            'createdByName': self.user.name if self.user else None,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+        }
+
+    def __repr__(self):
+        return f'<StockMovement {self.type} {self.quantity}>'
+
+
 class User(db.Model):
     """Cashier / Owner account"""
     __tablename__ = 'users'
@@ -55,6 +173,7 @@ class User(db.Model):
     name = db.Column(db.String(100), nullable=False, unique=True)
     pin_hash = db.Column(db.String(256), nullable=False)
     role = db.Column(db.String(20), default='cashier')   # 'owner' or 'cashier'
+    shop_id = db.Column(db.String(36), db.ForeignKey('shops.id'), nullable=True)
     is_active = db.Column(db.Boolean, default=True)
     createdAt = db.Column(db.DateTime, default=datetime.utcnow)
 
@@ -71,6 +190,8 @@ class User(db.Model):
             'id': self.id,
             'name': self.name,
             'role': self.role,
+            'shopId': self.shop_id,
+            'shopName': self.shop.name if self.shop else None,
             'isActive': self.is_active,
             'createdAt': self.createdAt.isoformat(),
         }
@@ -79,12 +200,54 @@ class User(db.Model):
         return f'<User {self.name} ({self.role})>'
 
 
+class DeviceInvite(db.Model):
+    """One-time token used to link a mobile device to a shop."""
+    __tablename__ = 'device_invites'
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    shop_id = db.Column(db.String(36), db.ForeignKey('shops.id'), nullable=False, index=True)
+    token_hash = db.Column(db.String(64), nullable=False, unique=True, index=True)
+    created_by = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    device_label = db.Column(db.String(120), default='')
+    status = db.Column(db.String(20), default='active', index=True)
+    expires_at = db.Column(db.DateTime, nullable=False, index=True)
+    accepted_at = db.Column(db.DateTime, nullable=True)
+    accepted_device_id = db.Column(db.String(120), default='')
+    accepted_device_label = db.Column(db.String(120), default='')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+
+    shop = db.relationship('Shop', backref='device_invites', lazy=True)
+    creator = db.relationship('User', backref='created_device_invites', lazy=True)
+
+    def is_valid(self, now=None):
+        now = now or datetime.utcnow()
+        return self.status == 'active' and self.expires_at > now and self.shop and self.shop.is_active
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'shopId': self.shop_id,
+            'shopName': self.shop.name if self.shop else None,
+            'deviceLabel': self.device_label,
+            'status': self.status,
+            'expiresAt': self.expires_at.isoformat(),
+            'acceptedAt': self.accepted_at.isoformat() if self.accepted_at else None,
+            'acceptedDeviceId': self.accepted_device_id,
+            'acceptedDeviceLabel': self.accepted_device_label,
+            'createdAt': self.created_at.isoformat(),
+        }
+
+    def __repr__(self):
+        return f'<DeviceInvite shop={self.shop_id} status={self.status}>'
+
+
 class Shift(db.Model):
     """A cashier's work session — from opening float to cash reconciliation"""
     __tablename__ = 'shifts'
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     cashier_id = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    shop_id = db.Column(db.String(36), db.ForeignKey('shops.id'), nullable=True)
     cashier_name = db.Column(db.String(100), nullable=False)
     opening_float = db.Column(db.Float, default=0.0)
     closing_cash = db.Column(db.Float, nullable=True)
@@ -102,6 +265,8 @@ class Shift(db.Model):
         return {
             'id': self.id,
             'cashierId': self.cashier_id,
+            'shopId': self.shop_id,
+            'shopName': self.shop.name if self.shop else None,
             'cashierName': self.cashier_name,
             'openingFloat': self.opening_float,
             'closingCash': self.closing_cash,
@@ -124,6 +289,7 @@ class Transaction(db.Model):
     id = db.Column(db.String(36), primary_key=True)   # UUID from Flutter (idempotent)
     receipt_number = db.Column(db.String(50), unique=True, nullable=False)
     shift_id = db.Column(db.String(36), db.ForeignKey('shifts.id'), nullable=True)
+    shop_id = db.Column(db.String(36), db.ForeignKey('shops.id'), nullable=True)
     cashier_id = db.Column(db.String(36), nullable=False)
     cashier_name = db.Column(db.String(100), nullable=False)
     subtotal = db.Column(db.Float, default=0.0)
@@ -146,6 +312,8 @@ class Transaction(db.Model):
             'id': self.id,
             'receiptNumber': self.receipt_number,
             'shiftId': self.shift_id,
+            'shopId': self.shop_id,
+            'shopName': self.shop.name if self.shop else None,
             'cashierId': self.cashier_id,
             'cashierName': self.cashier_name,
             'subtotal': self.subtotal,
@@ -223,6 +391,7 @@ class Expense(db.Model):
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     shift_id = db.Column(db.String(36), db.ForeignKey('shifts.id'), nullable=True)
+    shop_id = db.Column(db.String(36), db.ForeignKey('shops.id'), nullable=True)
     cashier_id = db.Column(db.String(36), nullable=False)
     cashier_name = db.Column(db.String(100), nullable=False)
     category = db.Column(db.String(100), nullable=False)
@@ -237,6 +406,8 @@ class Expense(db.Model):
         return {
             'id': self.id,
             'shiftId': self.shift_id,
+            'shopId': self.shop_id,
+            'shopName': self.shop.name if self.shop else None,
             'cashierId': self.cashier_id,
             'cashierName': self.cashier_name,
             'category': self.category,

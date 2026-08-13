@@ -53,6 +53,16 @@ The API will be available at `http://localhost:5000`
 
 - **GET** `/api/health` - Health check
 
+### Device Pairing
+
+- **POST** `/api/device-invites` - Owner creates a one-time shop pairing token
+  - JSON: `shopId`, optional `deviceLabel`, optional `expiresInHours`
+
+- **GET** `/api/device-invites/<token>` - Preview the shop linked to an active token
+
+- **POST** `/api/device-invites/<token>/accept` - Mobile device accepts the invite
+  - JSON: `deviceId`, optional `deviceLabel`
+
 ## Excel File Format
 
 Upload an Excel file with the following columns (header row required):

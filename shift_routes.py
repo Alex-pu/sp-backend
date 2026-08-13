@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
-from models import Shift, Transaction, Payment, Expense, db
+from auth_utils import is_owner, resolve_accessible_shop
+from models import Shift, Transaction, Payment, Expense, User, db
 from datetime import datetime
 
 shifts_bp = Blueprint('shifts', __name__, url_prefix='/api/shifts')
@@ -12,6 +13,9 @@ def open_shift():
     """Open a new shift.  A cashier can only have one open shift at a time."""
     user_id = get_jwt_identity()
     claims = get_jwt()
+    user = User.query.get(user_id)
+    if not user:
+        return jsonify({'success': False, 'message': 'User not found'}), 404
 
     existing = Shift.query.filter_by(cashier_id=user_id, status='open').first()
     if existing:
@@ -23,9 +27,14 @@ def open_shift():
 
     data = request.get_json() or {}
     opening_float = float(data.get('openingFloat', 0))
+    try:
+        shop = resolve_accessible_shop(data.get('shopId'))
+    except ValueError as e:
+        return jsonify({'success': False, 'message': str(e)}), 400
 
     shift = Shift(
         cashier_id=user_id,
+        shop_id=shop.id,
         cashier_name=claims.get('name', ''),
 
         opening_float=opening_float,
@@ -44,12 +53,19 @@ def list_shifts():
     claims = get_jwt()
 
     query = Shift.query
-    if claims.get('role') != 'owner':
+    if not is_owner():
         query = query.filter_by(cashier_id=user_id)
 
     status = request.args.get('status')
+    shop_id = request.args.get('shopId')
     if status:
         query = query.filter_by(status=status)
+    if shop_id and is_owner():
+        try:
+            shop = resolve_accessible_shop(shop_id)
+            query = query.filter_by(shop_id=shop.id)
+        except ValueError as e:
+            return jsonify({'success': False, 'message': str(e)}), 400
 
     shifts = query.order_by(Shift.opened_at.desc()).limit(100).all()
     return jsonify({'success': True, 'data': [s.to_dict() for s in shifts]}), 200
@@ -74,7 +90,7 @@ def get_shift(shift_id):
     shift = Shift.query.get(shift_id)
     if not shift:
         return jsonify({'success': False, 'message': 'Shift not found'}), 404
-    if claims.get('role') != 'owner' and shift.cashier_id != user_id:
+    if not is_owner() and shift.cashier_id != user_id:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
     return jsonify({'success': True, 'data': shift.to_dict()}), 200
 
@@ -91,7 +107,7 @@ def close_shift(shift_id):
         return jsonify({'success': False, 'message': 'Shift not found'}), 404
     if shift.status == 'closed':
         return jsonify({'success': False, 'message': 'Shift is already closed'}), 400
-    if claims.get('role') != 'owner' and shift.cashier_id != user_id:
+    if not is_owner() and shift.cashier_id != user_id:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
 
     data = request.get_json() or {}
@@ -136,7 +152,7 @@ def shift_summary(shift_id):
 
     if not shift:
         return jsonify({'success': False, 'message': 'Shift not found'}), 404
-    if claims.get('role') != 'owner' and shift.cashier_id != user_id:
+    if not is_owner() and shift.cashier_id != user_id:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
 
     transactions = Transaction.query.filter_by(

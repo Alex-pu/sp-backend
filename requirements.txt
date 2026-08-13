@@ -1,11 +1,13 @@
 Flask==3.0.0
 Flask-SQLAlchemy==3.1.1
 SQLAlchemy==2.0.35
+Flask-Migrate==4.0.7
 Flask-CORS==4.0.0
 Flask-JWT-Extended==4.6.0
 openpyxl==3.1.5
 python-dotenv==1.0.0
 gunicorn==22.0.0
-pg8000==1.31.2
+psycopg[binary]>=3.2.0
 cryptography>=42.0.0
 requests>=2.31.0
+pytest>=8.0.0

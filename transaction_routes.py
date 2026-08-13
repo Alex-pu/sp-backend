@@ -1,6 +1,8 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import jwt_required, get_jwt_identity, get_jwt
-from models import Transaction, TransactionItem, Payment, Product, db
+from auth_utils import is_owner, owner_required_response, resolve_accessible_shop
+from models import Transaction, TransactionItem, Payment, Product, Shift, db
+from stock_routes import apply_stock_movement
 from datetime import datetime
 
 transactions_bp = Blueprint('transactions', __name__, url_prefix='/api/transactions')
@@ -8,12 +10,41 @@ transactions_bp = Blueprint('transactions', __name__, url_prefix='/api/transacti
 
 def _build_transaction(data, user_id, claims):
     """Create Transaction + children from a dict. Deducts stock. No commit."""
+    shop = resolve_accessible_shop(data.get('shopId') or claims.get('shopId'))
+    shop_id = shop.id
+    owner = is_owner()
+    cashier_id = data.get('cashierId', user_id) if owner else user_id
+    cashier_name = data.get('cashierName', claims.get('name', '')) if owner else claims.get('name', '')
+
+    shift_id = data.get('shiftId')
+    if not shift_id and not owner:
+        open_shift = Shift.query.filter_by(
+            cashier_id=user_id,
+            shop_id=shop_id,
+            status='open',
+        ).first()
+        if not open_shift:
+            raise ValueError('An open shift is required before selling')
+        shift_id = open_shift.id
+
+    if shift_id:
+        shift = Shift.query.get(shift_id)
+        if not shift:
+            raise ValueError('Shift not found')
+        if shift.status != 'open':
+            raise ValueError('Shift must be open')
+        if shift.shop_id and shift.shop_id != shop_id:
+            raise ValueError('Shift does not belong to this shop')
+        if not owner and shift.cashier_id != user_id:
+            raise ValueError('Shift does not belong to this cashier')
+
     txn = Transaction(
         id=data['id'],
         receipt_number=data['receiptNumber'],
-        shift_id=data.get('shiftId'),
-        cashier_id=data.get('cashierId', user_id),
-        cashier_name=data.get('cashierName', claims.get('name', '')),
+        shift_id=shift_id,
+        shop_id=shop_id,
+        cashier_id=cashier_id,
+        cashier_name=cashier_name,
 
         subtotal=float(data.get('subtotal', 0)),
         discount_total=float(data.get('discountTotal', 0)),
@@ -43,11 +74,23 @@ def _build_transaction(data, user_id, claims):
         )
         db.session.add(item)
 
-        # Deduct stock from product table
+        # Deduct stock from the selling shop and write audit movement.
         if item_data.get('productId'):
             product = Product.query.get(item_data['productId'])
             if product:
-                product.stockLevel = max(0, product.stockLevel - item.quantity)
+                if not product.is_active:
+                    raise ValueError(f'Product is inactive: {product.code}')
+                apply_stock_movement(
+                    shop_id=shop_id,
+                    product_id=product.id,
+                    movement_type='sale',
+                    quantity=-item.quantity,
+                    user_id=user_id,
+                    reason='Sale',
+                    reference_type='transaction',
+                    reference_id=txn.id,
+                    reorder_level=product.reorderLevel,
+                )
 
     for pmt_data in data.get('payments', []):
         pmt = Payment(
@@ -82,11 +125,21 @@ def sync_transaction():
     existing = Transaction.query.get(data['id'])
     if existing:
         return jsonify({'success': True, 'message': 'Already synced', 'data': existing.to_dict()}), 200
+    receipt_owner = Transaction.query.filter_by(receipt_number=data['receiptNumber']).first()
+    if receipt_owner:
+        return jsonify({
+            'success': False,
+            'message': 'Receipt number already exists for another transaction',
+            'existingTransactionId': receipt_owner.id,
+        }), 409
 
     try:
         txn = _build_transaction(data, user_id, claims)
         db.session.commit()
         return jsonify({'success': True, 'data': txn.to_dict()}), 201
+    except ValueError as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 400
     except Exception as e:
         db.session.rollback()
         return jsonify({'success': False, 'message': str(e)}), 500
@@ -111,10 +164,21 @@ def sync_batch():
         if Transaction.query.get(txn_data.get('id')):
             results['skipped'] += 1
             continue
+        receipt_owner = Transaction.query.filter_by(receipt_number=txn_data.get('receiptNumber')).first()
+        if receipt_owner:
+            results['failed'] += 1
+            results['errors'].append(
+                f"{txn_data.get('id', '?')}: receiptNumber already used by {receipt_owner.id}"
+            )
+            continue
         try:
             _build_transaction(txn_data, user_id, claims)
             db.session.commit()
             results['synced'] += 1
+        except ValueError as e:
+            db.session.rollback()
+            results['failed'] += 1
+            results['errors'].append(f"{txn_data.get('id', '?')}: {str(e)}")
         except Exception as e:
             db.session.rollback()
             results['failed'] += 1
@@ -139,11 +203,14 @@ def list_transactions():
         query = query.filter_by(cashier_id=user_id)
 
     shift_id = request.args.get('shiftId')
+    shop_id = request.args.get('shopId')
     date_from = request.args.get('dateFrom')
     date_to = request.args.get('dateTo')
 
     if shift_id:
         query = query.filter_by(shift_id=shift_id)
+    if shop_id and is_owner():
+        query = query.filter_by(shop_id=shop_id)
     if date_from:
         query = query.filter(Transaction.created_at >= datetime.fromisoformat(date_from))
     if date_to:
@@ -168,10 +235,58 @@ def list_transactions():
 @transactions_bp.route('/<transaction_id>', methods=['GET'])
 @jwt_required()
 def get_transaction(transaction_id):
-    identity = get_jwt_identity()
+    user_id = get_jwt_identity()
+    claims = get_jwt()
     txn = Transaction.query.get(transaction_id)
     if not txn:
         return jsonify({'success': False, 'message': 'Transaction not found'}), 404
-    if identity['role'] != 'owner' and txn.cashier_id != identity['id']:
+    if claims.get('role') != 'owner' and txn.cashier_id != user_id:
         return jsonify({'success': False, 'message': 'Unauthorized'}), 403
     return jsonify({'success': True, 'data': txn.to_dict()}), 200
+
+
+@transactions_bp.route('/<transaction_id>/void', methods=['POST'])
+@jwt_required()
+def void_transaction(transaction_id):
+    """Void a completed transaction and restore stock to the original shop."""
+    owner_error = owner_required_response()
+    if owner_error:
+        return owner_error
+
+    user_id = get_jwt_identity()
+    data = request.get_json() or {}
+    reason = data.get('reason', '').strip()
+    if not reason:
+        return jsonify({'success': False, 'message': 'reason is required'}), 400
+
+    txn = Transaction.query.get(transaction_id)
+    if not txn:
+        return jsonify({'success': False, 'message': 'Transaction not found'}), 404
+    if txn.status == 'voided':
+        return jsonify({'success': False, 'message': 'Transaction is already voided'}), 400
+    if txn.status != 'completed':
+        return jsonify({'success': False, 'message': 'Only completed transactions can be voided'}), 400
+    if not txn.shop_id:
+        return jsonify({'success': False, 'message': 'Transaction has no shop and cannot restore stock safely'}), 400
+
+    try:
+        for item in txn.items:
+            if not item.product_id:
+                continue
+            apply_stock_movement(
+                shop_id=txn.shop_id,
+                product_id=item.product_id,
+                movement_type='void',
+                quantity=item.quantity,
+                user_id=user_id,
+                reason=reason,
+                reference_type='transaction_void',
+                reference_id=txn.id,
+            )
+
+        txn.status = 'voided'
+        db.session.commit()
+        return jsonify({'success': True, 'data': txn.to_dict()}), 200
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
