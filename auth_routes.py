@@ -10,7 +10,13 @@ def _first_active_shop():
 
 
 def _token_claims(user):
-    return {'name': user.name, 'role': user.role, 'shopId': user.shop_id}
+    return {
+        'name': user.name,
+        'email': user.email,
+        'phone': user.phone,
+        'role': user.role,
+        'shopId': user.shop_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -31,10 +37,16 @@ def initial_setup():
 
     data = request.get_json() or {}
     name = data.get('name', '').strip()
+    email = data.get('email', '').strip().lower()
+    phone = data.get('phone', '').strip()
     pin = str(data.get('pin', ''))
 
-    if not name or not pin:
-        return jsonify({'success': False, 'message': 'Name and PIN are required'}), 400
+    if not name or not email or not phone or not pin:
+        return jsonify({'success': False, 'message': 'Name, email, phone and PIN are required'}), 400
+    if '@' not in email or '.' not in email.split('@')[-1]:
+        return jsonify({'success': False, 'message': 'Valid email is required'}), 400
+    if not _valid_phone(phone):
+        return jsonify({'success': False, 'message': 'Valid phone is required'}), 400
     if not pin.isdigit() or len(pin) < 4 or len(pin) > 6:
         return jsonify({'success': False, 'message': 'PIN must be 4-6 digits'}), 400
 
@@ -43,7 +55,7 @@ def initial_setup():
     db.session.add(shop)
     db.session.flush()
 
-    user = User(name=name, role='owner', shop_id=shop.id)
+    user = User(name=name, email=email, phone=phone, role='owner', shop_id=shop.id)
     user.set_pin(pin)
     db.session.add(user)
     db.session.commit()
@@ -121,6 +133,8 @@ def create_user():
 
     data = request.get_json() or {}
     name = data.get('name', '').strip()
+    email = data.get('email', '').strip().lower()
+    phone = data.get('phone', '').strip()
     pin = str(data.get('pin', ''))
     role = data.get('role', 'cashier')
     shop_id = data.get('shopId')
@@ -134,6 +148,10 @@ def create_user():
 
     if User.query.filter(db.func.lower(User.name) == name.lower()).first():
         return jsonify({'success': False, 'message': 'A user with that name already exists'}), 409
+    if email and User.query.filter(db.func.lower(User.email) == email).first():
+        return jsonify({'success': False, 'message': 'A user with that email already exists'}), 409
+    if phone and not _valid_phone(phone):
+        return jsonify({'success': False, 'message': 'Valid phone is required'}), 400
 
     if shop_id:
         shop = Shop.query.get(shop_id)
@@ -145,7 +163,7 @@ def create_user():
             return jsonify({'success': False, 'message': 'Create a shop before adding users'}), 400
         shop_id = shop.id
 
-    user = User(name=name, role=role, shop_id=shop_id)
+    user = User(name=name, email=email or None, phone=phone or None, role=role, shop_id=shop_id)
     user.set_pin(pin)
     db.session.add(user)
     db.session.commit()
@@ -180,6 +198,16 @@ def update_user(user_id):
     if is_owner:
         if 'name' in data:
             user.name = data['name'].strip()
+        if 'email' in data:
+            email = data['email'].strip().lower()
+            if email and ('@' not in email or '.' not in email.split('@')[-1]):
+                return jsonify({'success': False, 'message': 'Valid email is required'}), 400
+            user.email = email or None
+        if 'phone' in data:
+            phone = data['phone'].strip()
+            if phone and not _valid_phone(phone):
+                return jsonify({'success': False, 'message': 'Valid phone is required'}), 400
+            user.phone = phone or None
         if 'role' in data and data['role'] in ('owner', 'cashier'):
             user.role = data['role']
         if 'shopId' in data:
@@ -194,3 +222,8 @@ def update_user(user_id):
 
     db.session.commit()
     return jsonify({'success': True, 'user': user.to_dict()}), 200
+
+
+def _valid_phone(value):
+    digits = ''.join(ch for ch in value if ch.isdigit())
+    return 7 <= len(digits) <= 15

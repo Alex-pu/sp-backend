@@ -171,6 +171,8 @@ class User(db.Model):
 
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(100), nullable=False, unique=True)
+    email = db.Column(db.String(255), nullable=True, unique=True)
+    phone = db.Column(db.String(30), nullable=True)
     pin_hash = db.Column(db.String(256), nullable=False)
     role = db.Column(db.String(20), default='cashier')   # 'owner' or 'cashier'
     shop_id = db.Column(db.String(36), db.ForeignKey('shops.id'), nullable=True)
@@ -189,6 +191,8 @@ class User(db.Model):
         return {
             'id': self.id,
             'name': self.name,
+            'email': self.email,
+            'phone': self.phone,
             'role': self.role,
             'shopId': self.shop_id,
             'shopName': self.shop.name if self.shop else None,
