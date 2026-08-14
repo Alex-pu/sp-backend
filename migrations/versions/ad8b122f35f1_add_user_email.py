@@ -1,7 +1,7 @@
 """add user contact details
 
 Revision ID: ad8b122f35f1
-Revises: e239e203d230
+Revises: a02fb46e1b79
 Create Date: 2026-08-14 12:10:00.000000
 
 """
@@ -11,7 +11,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision = 'ad8b122f35f1'
-down_revision = 'e239e203d230'
+down_revision = 'a02fb46e1b79'
 branch_labels = None
 depends_on = None
 
