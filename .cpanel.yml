@@ -1,0 +1,28 @@
+---
+deployment:
+  tasks:
+    - export DEPLOYPATH=/home2/sasalink/sp-backend/
+    - /bin/mkdir -p $DEPLOYPATH
+    - /bin/cp admin.html $DEPLOYPATH
+    - /bin/cp app.py $DEPLOYPATH
+    - /bin/cp auth_routes.py $DEPLOYPATH
+    - /bin/cp auth_utils.py $DEPLOYPATH
+    - /bin/cp config.py $DEPLOYPATH
+    - /bin/cp device_invite_routes.py $DEPLOYPATH
+    - /bin/cp etims_routes.py $DEPLOYPATH
+    - /bin/cp expense_routes.py $DEPLOYPATH
+    - /bin/cp models.py $DEPLOYPATH
+    - /bin/cp passenger_wsgi.py $DEPLOYPATH
+    - /bin/cp report_routes.py $DEPLOYPATH
+    - /bin/cp requirements.txt $DEPLOYPATH
+    - /bin/cp routes.py $DEPLOYPATH
+    - /bin/cp runtime.txt $DEPLOYPATH
+    - /bin/cp shift_routes.py $DEPLOYPATH
+    - /bin/cp shop_routes.py $DEPLOYPATH
+    - /bin/cp stock_routes.py $DEPLOYPATH
+    - /bin/cp sync_routes.py $DEPLOYPATH
+    - /bin/cp transaction_routes.py $DEPLOYPATH
+    - /bin/cp utils.py $DEPLOYPATH
+    - /bin/cp -R migrations $DEPLOYPATH
+    - /bin/mkdir -p $DEPLOYPATH/tmp
+    - /bin/touch $DEPLOYPATH/tmp/restart.txt
