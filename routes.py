@@ -137,6 +137,73 @@ def get_product_by_code(code):
     except Exception as e:
         return jsonify({'success': False, 'message': str(e)}), 500
 
+@api.route('/products', methods=['POST'])
+@jwt_required()
+def create_product():
+    """Create a product from the admin dashboard."""
+    owner_error = owner_required_response()
+    if owner_error:
+        return owner_error
+
+    try:
+        data = request.get_json() or {}
+        code = str(data.get('code', '')).strip()
+        name = str(data.get('name', '')).strip()
+        if not code or not name or data.get('sellingPrice') is None:
+            return jsonify({
+                'success': False,
+                'message': 'Code, name, and sellingPrice are required'
+            }), 400
+
+        if Product.query.filter_by(code=code).first():
+            return jsonify({
+                'success': False,
+                'message': f'Product code already exists: {code}'
+            }), 409
+
+        product = Product(
+            code=code,
+            name=name,
+            description=str(data.get('description', '')).strip(),
+            category=str(data.get('category', 'General')).strip() or 'General',
+            costPrice=float(data.get('costPrice', 0)),
+            sellingPrice=float(data['sellingPrice']),
+            reorderLevel=int(data.get('reorderLevel', 10)),
+        )
+        db.session.add(product)
+        db.session.flush()
+
+        shop_id = data.get('shopId') or request.args.get('shopId')
+        if shop_id:
+            shop = resolve_accessible_shop(shop_id)
+            get_or_create_inventory(shop.id, product.id, product.reorderLevel)
+            initial_stock = int(data.get('stockLevel', 0))
+            if initial_stock:
+                apply_stock_movement(
+                    shop_id=shop.id,
+                    product_id=product.id,
+                    movement_type='stock_received',
+                    quantity=initial_stock,
+                    user_id=get_jwt_identity(),
+                    reason='Initial product stock',
+                    reference_type='product_create',
+                    reference_id=product.code,
+                    reorder_level=product.reorderLevel,
+                )
+
+        db.session.commit()
+        return jsonify({
+            'success': True,
+            'message': 'Product created',
+            'data': product.to_dict()
+        }), 201
+    except (TypeError, ValueError) as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': f'Invalid product data: {e}'}), 400
+    except Exception as e:
+        db.session.rollback()
+        return jsonify({'success': False, 'message': str(e)}), 500
+
 @api.route('/products/upload', methods=['POST'])
 @jwt_required()
 def upload_products():

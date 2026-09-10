@@ -104,6 +104,32 @@ def test_product_archive_hides_from_cashier_and_blocks_sale(client, seed, mary_h
     assert 'Product is inactive' in sale.get_json()['message']
 
 
+def test_owner_can_create_product_with_barcode_and_initial_stock(client, seed, owner_headers):
+    response = client.post(
+        '/api/products',
+        json={
+            'code': '6161101234567',
+            'name': 'New Product',
+            'sellingPrice': 125.5,
+            'stockLevel': 4,
+            'shopId': seed['shop_a_id'],
+        },
+        headers=owner_headers,
+    )
+
+    assert response.status_code == 201
+    assert response.get_json()['data']['code'] == '6161101234567'
+    product = Product.query.filter_by(code='6161101234567').one()
+    assert stock_for(seed['shop_a_id'], product.id) == 4
+
+    duplicate = client.post(
+        '/api/products',
+        json={'code': '6161101234567', 'name': 'Duplicate', 'sellingPrice': 1},
+        headers=owner_headers,
+    )
+    assert duplicate.status_code == 409
+
+
 def test_low_stock_and_bootstrap(client, seed, mary_headers, owner_headers):
     inventory = ShopInventory.query.filter_by(shop_id=seed['shop_a_id'], product_id=seed['product_id']).one()
     inventory.stock_level = 5

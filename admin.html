@@ -459,6 +459,44 @@
         
         <!-- ====== PRODUCTS TAB ====== -->
         <div class="tab-panel active" id="tab-products">
+            <!-- Add Product Section -->
+            <div class="section">
+                <h2>Add Product</h2>
+                <div class="form-card">
+                    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:12px;">
+                        <div class="form-group">
+                            <label for="productCode">Barcode / Code</label>
+                            <input type="text" id="productCode" placeholder="e.g. 6161101234567" autocomplete="off" />
+                        </div>
+                        <div class="form-group">
+                            <label for="productName">Product Name</label>
+                            <input type="text" id="productName" placeholder="Product name" autocomplete="off" />
+                        </div>
+                        <div class="form-group">
+                            <label for="productCategory">Category</label>
+                            <input type="text" id="productCategory" value="General" autocomplete="off" />
+                        </div>
+                        <div class="form-group">
+                            <label for="productCost">Cost Price</label>
+                            <input type="number" id="productCost" min="0" step="0.01" value="0" />
+                        </div>
+                        <div class="form-group">
+                            <label for="productSellingPrice">Selling Price</label>
+                            <input type="number" id="productSellingPrice" min="0" step="0.01" placeholder="0.00" />
+                        </div>
+                        <div class="form-group">
+                            <label for="productStock">Opening Stock</label>
+                            <input type="number" id="productStock" min="0" step="1" value="0" />
+                        </div>
+                    </div>
+                    <div class="message" id="productMessage"></div>
+                    <div class="button-group">
+                        <button class="btn-primary" id="addProductBtn" onclick="addProduct()">Add Product</button>
+                        <button class="btn-secondary" onclick="clearProductForm()">Clear</button>
+                    </div>
+                </div>
+            </div>
+
             <!-- Upload Section -->
             <div class="section">
                 <h2>Upload Products</h2>
@@ -491,6 +529,14 @@
                     <button class="btn-primary" id="uploadBtn" onclick="uploadFile()">Upload Products</button>
                     <button class="btn-secondary" onclick="clearFile()">Clear Selection</button>
                 </div>
+            </div>
+
+            <!-- Product List Section -->
+            <div class="section">
+                <h2>Products and Barcodes</h2>
+                <button class="btn-secondary" onclick="loadProducts()">Refresh Products</button>
+                <div class="message" id="productsMessage"></div>
+                <div id="productsTableContainer" style="overflow-x:auto;margin-top:12px;"></div>
             </div>
             
             <!-- Stats Section -->
@@ -864,6 +910,10 @@
         }
         
         async function uploadFile() {
+            if (!authToken) {
+                showMessage('Please log in as Owner first', 'error');
+                return;
+            }
             if (!fileInput.files || !fileInput.files[0]) {
                 showMessage('Please select a file', 'error');
                 return;
@@ -875,6 +925,7 @@
             try {
                 const response = await fetch(`${window.location.origin}/api/products/upload`, {
                     method: 'POST',
+                    headers: { 'Authorization': 'Bearer ' + authToken },
                     body: formData
                 });
                 const data = await response.json();
@@ -902,8 +953,15 @@
         }
         
         async function loadStats() {
+            if (!authToken) {
+                document.getElementById('statsMessage').textContent = 'Please log in as Owner first';
+                document.getElementById('statsMessage').className = 'message show error';
+                return;
+            }
             try {
-                const response = await fetch(`${window.location.origin}/api/stats`);
+                const response = await fetch(`${window.location.origin}/api/stats`, {
+                    headers: { 'Authorization': 'Bearer ' + authToken }
+                });
                 const data = await response.json();
                 if (data.success) {
                     const stats = data.data;
@@ -926,6 +984,96 @@
         function showMessage(text, type) {
             messageEl.textContent = text;
             messageEl.className = `message show ${type}`;
+        }
+
+        function clearProductForm() {
+            ['productCode', 'productName', 'productSellingPrice'].forEach(id => {
+                document.getElementById(id).value = '';
+            });
+            document.getElementById('productCategory').value = 'General';
+            document.getElementById('productCost').value = '0';
+            document.getElementById('productStock').value = '0';
+            document.getElementById('productMessage').className = 'message';
+        }
+
+        async function addProduct() {
+            const message = document.getElementById('productMessage');
+            const button = document.getElementById('addProductBtn');
+            if (!authToken) {
+                message.textContent = 'Please log in as Owner first';
+                message.className = 'message show error';
+                return;
+            }
+            const payload = {
+                code: document.getElementById('productCode').value.trim(),
+                name: document.getElementById('productName').value.trim(),
+                category: document.getElementById('productCategory').value.trim(),
+                costPrice: document.getElementById('productCost').value,
+                sellingPrice: document.getElementById('productSellingPrice').value,
+                stockLevel: document.getElementById('productStock').value
+            };
+            button.disabled = true;
+            try {
+                const response = await fetch(`${window.location.origin}/api/products`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json',
+                        'Authorization': 'Bearer ' + authToken
+                    },
+                    body: JSON.stringify(payload)
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    throw new Error(data.message || 'Could not add product');
+                }
+                message.textContent = 'Product added successfully';
+                message.className = 'message show success';
+                clearProductForm();
+                message.textContent = 'Product added successfully';
+                message.className = 'message show success';
+                await loadProducts();
+            } catch (error) {
+                message.textContent = error.message;
+                message.className = 'message show error';
+            } finally {
+                button.disabled = false;
+            }
+        }
+
+        async function loadProducts() {
+            const container = document.getElementById('productsTableContainer');
+            const message = document.getElementById('productsMessage');
+            if (!authToken) {
+                message.textContent = 'Please log in as Owner first';
+                message.className = 'message show error';
+                return;
+            }
+            try {
+                const response = await fetch(`${window.location.origin}/api/products?includeInactive=true&per_page=200`, {
+                    headers: { 'Authorization': 'Bearer ' + authToken }
+                });
+                const data = await response.json();
+                if (!response.ok || !data.success) {
+                    throw new Error(data.message || 'Could not load products');
+                }
+                message.className = 'message';
+                if (!data.data.length) {
+                    container.innerHTML = '<p>No products found.</p>';
+                    return;
+                }
+                container.innerHTML = `<table class="users-table"><thead><tr><th>Product</th><th>Barcode / Code</th><th>Price</th><th>Stock</th><th>Status</th></tr></thead><tbody>${data.data.map(product => `
+                    <tr><td>${escapeHtml(product.name)}</td><td><strong>${escapeHtml(product.code)}</strong></td><td>KES ${Number(product.sellingPrice).toFixed(2)}</td><td>${product.stockLevel}</td><td>${product.isActive ? 'Active' : 'Archived'}</td></tr>
+                `).join('')}</tbody></table>`;
+            } catch (error) {
+                message.textContent = error.message;
+                message.className = 'message show error';
+            }
+        }
+
+        function escapeHtml(value) {
+            return String(value).replace(/[&<>'"]/g, character => ({
+                '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;'
+            }[character]));
         }
 
         // ===================== USERS =====================
@@ -987,6 +1135,7 @@
                     document.getElementById('authName').textContent = currentUserName;
                     showUserPanel('panel-users');
                     loadUsers();
+                    loadProducts();
                 } else {
                     showUserMsg('setupMessage', data.message || 'Setup failed.', 'error');
                 }
@@ -1017,6 +1166,7 @@
                     document.getElementById('authName').textContent = currentUserName;
                     showUserPanel('panel-users');
                     loadUsers();
+                    loadProducts();
                 } else {
                     showUserMsg('loginMessage', data.message || 'Login failed.', 'error');
                 }
