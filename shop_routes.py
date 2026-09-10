@@ -36,7 +36,10 @@ def create_shop():
     if Shop.query.filter(db.func.lower(Shop.name) == name.lower()).first():
         return jsonify({'success': False, 'message': 'A shop with that name already exists'}), 409
 
-    shop = Shop(name=name, location=location)
+    next_code = f'S{Shop.query.count() + 1:02d}'
+    while Shop.query.filter_by(payment_code=next_code).first():
+        next_code = f'S{Shop.query.count() + 2:02d}'
+    shop = Shop(name=name, location=location, payment_code=next_code)
     db.session.add(shop)
     db.session.commit()
     return jsonify({'success': True, 'data': shop.to_dict()}), 201

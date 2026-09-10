@@ -60,6 +60,7 @@ def _build_transaction(data, user_id, claims):
         synced_at=datetime.utcnow(),
     )
     db.session.add(txn)
+    db.session.flush()
 
     for item_data in data.get('items', []):
         item = TransactionItem(
@@ -102,6 +103,24 @@ def _build_transaction(data, user_id, claims):
             card_last4=pmt_data.get('cardLast4', ''),
         )
         db.session.add(pmt)
+
+    # A Sandbox STK callback may arrive before or after this offline sale sync.
+    # Attach an already-confirmed payment leg when it exists.
+    from models import MpesaPayment
+    confirmed_mpesa = MpesaPayment.query.filter_by(
+        transaction_id=txn.id,
+        status='matched',
+    ).first()
+    if confirmed_mpesa and not any(
+        pmt_data.get('method') == 'mpesa' for pmt_data in data.get('payments', [])
+    ):
+        db.session.add(Payment(
+            transaction_id=txn.id,
+            method='mpesa',
+            amount=confirmed_mpesa.amount,
+            reference=confirmed_mpesa.provider_receipt_number or '',
+            phone_number=confirmed_mpesa.phone_number,
+        ))
 
     return txn
 

@@ -12,6 +12,7 @@ class Shop(db.Model):
     id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
     name = db.Column(db.String(120), nullable=False, unique=True)
     location = db.Column(db.String(255), default='')
+    payment_code = db.Column(db.String(20), unique=True, nullable=True, index=True)
     is_active = db.Column(db.Boolean, default=True)
     created_at = db.Column(db.DateTime, default=datetime.utcnow)
     updated_at = db.Column(db.DateTime, default=datetime.utcnow, onupdate=datetime.utcnow)
@@ -26,6 +27,7 @@ class Shop(db.Model):
             'id': self.id,
             'name': self.name,
             'location': self.location,
+            'paymentCode': self.payment_code,
             'isActive': self.is_active,
             'createdAt': self.created_at.isoformat(),
             'updatedAt': self.updated_at.isoformat() if self.updated_at else None,
@@ -386,6 +388,85 @@ class Payment(db.Model):
             'reference': self.reference,
             'phoneNumber': self.phone_number,
             'cardLast4': self.card_last4,
+        }
+
+
+class MpesaPayment(db.Model):
+    """A collection received through the shared M-Pesa PayBill."""
+    __tablename__ = 'mpesa_payments'
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    shop_id = db.Column(db.String(36), db.ForeignKey('shops.id'), nullable=True, index=True)
+    transaction_id = db.Column(db.String(36), db.ForeignKey('transactions.id'), nullable=True, index=True)
+    method = db.Column(db.String(30), nullable=False)  # stk_push or paybill
+    amount = db.Column(db.Float, nullable=False)
+    account_reference = db.Column(db.String(100), default='', index=True)
+    phone_number = db.Column(db.String(30), default='')
+    status = db.Column(db.String(20), default='pending', index=True)
+    provider_request_id = db.Column(db.String(100), unique=True, nullable=True)
+    provider_receipt_number = db.Column(db.String(100), unique=True, nullable=True)
+    failure_reason = db.Column(db.Text, default='')
+    raw_callback = db.Column(db.JSON, nullable=True)
+    created_at = db.Column(db.DateTime, default=datetime.utcnow, index=True)
+    confirmed_at = db.Column(db.DateTime, nullable=True)
+    matched_by = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=True)
+    matched_at = db.Column(db.DateTime, nullable=True)
+
+    shop = db.relationship('Shop', backref='mpesa_payments', lazy=True)
+    transaction = db.relationship('Transaction', backref='mpesa_payments', lazy=True)
+    matcher = db.relationship('User', foreign_keys=[matched_by], lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'shopId': self.shop_id,
+            'shopName': self.shop.name if self.shop else None,
+            'transactionId': self.transaction_id,
+            'method': self.method,
+            'amount': self.amount,
+            'accountReference': self.account_reference,
+            'phoneNumber': self.phone_number,
+            'status': self.status,
+            'providerRequestId': self.provider_request_id,
+            'providerReceiptNumber': self.provider_receipt_number,
+            'failureReason': self.failure_reason,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+            'confirmedAt': self.confirmed_at.isoformat() if self.confirmed_at else None,
+            'matchedBy': self.matched_by,
+            'matchedAt': self.matched_at.isoformat() if self.matched_at else None,
+        }
+
+
+class Settlement(db.Model):
+    """A requested release of confirmed M-Pesa funds to a shop owner."""
+    __tablename__ = 'settlements'
+
+    id = db.Column(db.String(36), primary_key=True, default=lambda: str(uuid.uuid4()))
+    shop_id = db.Column(db.String(36), db.ForeignKey('shops.id'), nullable=False, index=True)
+    amount = db.Column(db.Float, nullable=False)
+    destination_type = db.Column(db.String(20), nullable=False)  # mpesa or bank
+    destination = db.Column(db.String(120), nullable=False)
+    status = db.Column(db.String(20), default='pending', index=True)
+    requested_by = db.Column(db.String(36), db.ForeignKey('users.id'), nullable=False)
+    provider_reference = db.Column(db.String(100), default='')
+    created_at = db.Column(db.DateTime, default=datetime.utcnow)
+    completed_at = db.Column(db.DateTime, nullable=True)
+
+    shop = db.relationship('Shop', backref='settlements', lazy=True)
+
+    def to_dict(self):
+        return {
+            'id': self.id,
+            'shopId': self.shop_id,
+            'shopName': self.shop.name if self.shop else None,
+            'amount': self.amount,
+            'destinationType': self.destination_type,
+            'destination': self.destination,
+            'status': self.status,
+            'requestedBy': self.requested_by,
+            'providerReference': self.provider_reference,
+            'createdAt': self.created_at.isoformat() if self.created_at else None,
+            'completedAt': self.completed_at.isoformat() if self.completed_at else None,
         }
 
 

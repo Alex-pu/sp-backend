@@ -16,6 +16,7 @@ from shop_routes import shops_bp
 from stock_routes import stock_bp
 from sync_routes import sync_bp
 from device_invite_routes import device_invites_bp
+from payment_routes import payments_bp
 
 migrate = Migrate()
 
@@ -54,6 +55,7 @@ def create_app(env='development'):
     app.register_blueprint(stock_bp)
     app.register_blueprint(sync_bp)
     app.register_blueprint(device_invites_bp)
+    app.register_blueprint(payments_bp)
 
     # Serve admin dashboard
     @app.route('/', methods=['GET'])

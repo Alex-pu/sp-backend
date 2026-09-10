@@ -41,6 +41,20 @@ The API will be available at `http://localhost:5000`
   - Content-Type: `multipart/form-data`
   - File field: `file`
 
+### M-Pesa Sandbox Payments
+
+Set `MPESA_ENABLED=true` and the Daraja Sandbox values from `.env.example` to enable STK Push.
+Credentials must remain in the server environment and must not be committed.
+
+- **POST** `/api/payments/requests` - Create an STK Push or PayBill payment request
+- **POST** `/api/payments/callbacks/stk` - Public Daraja STK callback URL
+- **POST** `/api/payments/callbacks/c2b` - Public Daraja C2B validation/confirmation URL
+- **POST** `/api/payments/mpesa/register-callback` - Register C2B URLs with Daraja (owner JWT)
+- **GET** `/api/payments/unmatched` - View owner-reconciliation payments
+- **POST** `/api/payments/<payment_id>/match` - Match an unmatched payment to a sale
+- **GET** `/api/payments/balances` - View shop settlement balances
+- **POST** `/api/payments/settlements` - Create a test settlement request
+
 - **PUT** `/api/products/<product_id>` - Update a product
 
 - **DELETE** `/api/products/<product_id>` - Delete a product

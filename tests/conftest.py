@@ -34,8 +34,8 @@ def client(app):
 @pytest.fixture
 def seed(app):
     with app.app_context():
-        shop_a = Shop(name='Branch A')
-        shop_b = Shop(name='Branch B')
+        shop_a = Shop(name='Branch A', payment_code='S01')
+        shop_b = Shop(name='Branch B', payment_code='S02')
 
         owner = User(name='Admin', role='owner', shop=shop_a)
         owner.set_pin('1234')

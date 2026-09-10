@@ -130,6 +130,46 @@ def test_owner_can_create_product_with_barcode_and_initial_stock(client, seed, o
     assert duplicate.status_code == 409
 
 
+def test_c2b_payment_can_be_matched_and_settled(client, seed, owner_headers, mary_headers):
+    open_shift(client, mary_headers)
+    sale = client.post('/api/transactions', json=sale_payload(seed), headers=mary_headers)
+    assert sale.status_code == 201
+
+    callback = client.post('/api/payments/callbacks/c2b', json={
+        'TransID': 'MPESA-001',
+        'TransAmount': 100,
+        'BillRefNumber': 'S01',
+        'MSISDN': '254712345678',
+    })
+    assert callback.status_code == 200
+    assert callback.get_json()['payment']['status'] == 'unmatched'
+
+    unmatched = client.get('/api/payments/unmatched', headers=owner_headers)
+    payment_id = unmatched.get_json()['data'][0]['id']
+    matched = client.post(
+        f'/api/payments/{payment_id}/match',
+        json={'transactionId': 'txn-1'},
+        headers=owner_headers,
+    )
+    assert matched.status_code == 200
+    assert matched.get_json()['data']['status'] == 'matched'
+
+    balances = client.get('/api/payments/balances', headers=owner_headers)
+    assert balances.status_code == 200
+    assert balances.get_json()['data'][0]['availableBalance'] == 100
+
+    settlement = client.post('/api/payments/settlements', json={
+        'shopId': seed['shop_a_id'],
+        'amount': 100,
+        'destinationType': 'mpesa',
+        'destination': '254712345678',
+    }, headers=owner_headers)
+    assert settlement.status_code == 201
+
+    balances_after = client.get('/api/payments/balances', headers=owner_headers)
+    assert balances_after.get_json()['data'][0]['availableBalance'] == 0
+
+
 def test_low_stock_and_bootstrap(client, seed, mary_headers, owner_headers):
     inventory = ShopInventory.query.filter_by(shop_id=seed['shop_a_id'], product_id=seed['product_id']).one()
     inventory.stock_level = 5
