@@ -5,7 +5,13 @@ from flask import Blueprint, jsonify, request
 from flask_jwt_extended import get_jwt_identity, jwt_required
 
 from auth_utils import is_owner, resolve_accessible_shop
-from daraja_client import DarajaError, daraja_enabled, register_c2b_urls, stk_push
+from daraja_client import (
+    DarajaError,
+    daraja_enabled,
+    normalize_mpesa_phone,
+    register_c2b_urls,
+    stk_push,
+)
 from models import MpesaPayment, Payment, Settlement, Shop, Transaction, db
 
 
@@ -50,8 +56,12 @@ def create_payment_request():
         return jsonify({'success': False, 'message': 'A valid amount is required'}), 400
     if amount <= 0:
         return jsonify({'success': False, 'message': 'Amount must be greater than zero'}), 400
-    if method == 'stk_push' and not data.get('phoneNumber'):
-        return jsonify({'success': False, 'message': 'Phone number is required for STK Push'}), 400
+    phone_number = normalize_mpesa_phone(data.get('phoneNumber')) if method == 'stk_push' else ''
+    if method == 'stk_push' and not phone_number:
+        return jsonify({
+            'success': False,
+            'message': 'Enter a valid Kenyan M-Pesa number, for example 0712345678',
+        }), 400
 
     payment = MpesaPayment(
         shop_id=shop.id,
@@ -59,7 +69,7 @@ def create_payment_request():
         method=method,
         amount=amount,
         account_reference=shop.payment_code or '',
-        phone_number=data.get('phoneNumber', ''),
+        phone_number=phone_number,
         provider_request_id=None,
     )
     transaction_id = data.get('transactionId')

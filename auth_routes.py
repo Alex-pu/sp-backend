@@ -1,6 +1,7 @@
 from flask import Blueprint, request, jsonify
 from flask_jwt_extended import create_access_token, jwt_required, get_jwt_identity, get_jwt
 from models import User, Shop, db
+from shop_routes import next_payment_code
 
 auth_bp = Blueprint('auth', __name__, url_prefix='/api/auth')
 
@@ -51,7 +52,11 @@ def initial_setup():
         return jsonify({'success': False, 'message': 'PIN must be 4-6 digits'}), 400
 
     shop_name = data.get('shopName', 'Main Shop').strip() or 'Main Shop'
-    shop = Shop(name=shop_name, location=data.get('shopLocation', '').strip())
+    shop = Shop(
+        name=shop_name,
+        location=data.get('shopLocation', '').strip(),
+        payment_code=next_payment_code(),
+    )
     db.session.add(shop)
     db.session.flush()
 

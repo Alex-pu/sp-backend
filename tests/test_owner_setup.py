@@ -1,4 +1,4 @@
-from models import User
+from models import Shop, User
 
 
 def test_initial_setup_stores_owner_contact_details(client, app):
@@ -21,6 +21,14 @@ def test_initial_setup_stores_owner_contact_details(client, app):
         owner = User.query.filter_by(name='Owner').one()
         assert owner.email == 'owner@example.com'
         assert owner.phone == '+254712345678'
+        assert Shop.query.filter_by(name='Main Shop').one().payment_code == 'S01'
+
+
+def test_login_reports_invalid_credentials(client, seed):
+    response = client.post('/api/auth/login', json={'name': 'Mary', 'pin': 'wrong'})
+
+    assert response.status_code == 401
+    assert response.get_json()['message'] == 'Invalid name or PIN'
 
 
 def test_initial_setup_requires_owner_email(client):

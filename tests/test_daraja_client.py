@@ -14,6 +14,13 @@ class FakeResponse:
         return self.payload
 
 
+def test_normalize_mpesa_phone_accepts_common_kenyan_formats():
+    assert daraja_client.normalize_mpesa_phone('0712 345 678') == '254712345678'
+    assert daraja_client.normalize_mpesa_phone('+254712345678') == '254712345678'
+    assert daraja_client.normalize_mpesa_phone('712345678') == '254712345678'
+    assert daraja_client.normalize_mpesa_phone('12345') is None
+
+
 def test_sandbox_stk_push_builds_daraja_request(monkeypatch):
     monkeypatch.setenv('MPESA_BASE_URL', 'https://sandbox.example')
     monkeypatch.setenv('MPESA_CONSUMER_KEY', 'consumer-key')

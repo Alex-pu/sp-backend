@@ -9,6 +9,17 @@ class DarajaError(RuntimeError):
     pass
 
 
+def normalize_mpesa_phone(value):
+    digits = ''.join(character for character in str(value or '') if character.isdigit())
+    if digits.startswith('254') and len(digits) == 12 and digits[3] in '17':
+        return digits
+    if digits.startswith('0') and len(digits) == 10 and digits[1] in '17':
+        return f'254{digits[1:]}'
+    if len(digits) == 9 and digits[0] in '17':
+        return f'254{digits}'
+    return None
+
+
 def daraja_enabled():
     return os.environ.get('MPESA_ENABLED', '').lower() == 'true'
 
@@ -49,6 +60,9 @@ def _access_token():
 
 
 def stk_push(*, amount, phone_number, account_reference, transaction_description):
+    phone_number = normalize_mpesa_phone(phone_number)
+    if not phone_number:
+        raise DarajaError('Enter a valid Kenyan M-Pesa number, for example 0712345678')
     shortcode = _setting('MPESA_SHORTCODE')
     passkey = _setting('MPESA_PASSKEY')
     callback_url = _setting('MPESA_STK_CALLBACK_URL')

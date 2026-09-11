@@ -9,6 +9,13 @@ def _owner_required():
     return get_jwt().get('role') == 'owner'
 
 
+def next_payment_code():
+    number = Shop.query.count() + 1
+    while Shop.query.filter_by(payment_code=f'S{number:02d}').first():
+        number += 1
+    return f'S{number:02d}'
+
+
 @shops_bp.route('', methods=['GET'])
 @jwt_required()
 def list_shops():
@@ -36,10 +43,7 @@ def create_shop():
     if Shop.query.filter(db.func.lower(Shop.name) == name.lower()).first():
         return jsonify({'success': False, 'message': 'A shop with that name already exists'}), 409
 
-    next_code = f'S{Shop.query.count() + 1:02d}'
-    while Shop.query.filter_by(payment_code=next_code).first():
-        next_code = f'S{Shop.query.count() + 2:02d}'
-    shop = Shop(name=name, location=location, payment_code=next_code)
+    shop = Shop(name=name, location=location, payment_code=next_payment_code())
     db.session.add(shop)
     db.session.commit()
     return jsonify({'success': True, 'data': shop.to_dict()}), 201
